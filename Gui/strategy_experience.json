@@ -1,5 +1,16 @@
 {
   "sf16-sg-default.akamaized.net": {
-    "yt_dlp": 1
+    "yt_dlp": 5
+  },
+  "gyan.dev": {
+    "html_parser": 3
+  },
+  "github.com": {
+    "github_api": 3,
+    "browser": 8,
+    "html_parser": 1
+  },
+  "bilibili.com": {
+    "yt_dlp": 31
   }
 }

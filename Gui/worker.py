@@ -2,22 +2,28 @@
 
 import logging
 import re
-import subprocess
 import os
+import json
 from urllib.parse import urlparse
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QProcess
+import undetected_chromedriver as uc
 
 import backend_scraper
-from strategy_profiler import select_best_strategy, AVAILABLE_STRATEGIES, update_experience_data
+from strategy_profiler import (
+    select_best_strategy,
+    AVAILABLE_STRATEGIES,
+    update_experience_data,
+)
 
 logger = logging.getLogger(__name__)
 
-if os.name == 'nt':
-    CREATION_FLAGS = subprocess.CREATE_NO_WINDOW
-else:
-    CREATION_FLAGS = 0
 
 class Worker(QObject):
+    """
+    后台工作线程 (v3.1 - 最终异步版)
+    所有外部进程调用均使用 QProcess，保证完全可中断。
+    """
+
     sniff_finished = pyqtSignal(dict, str)
     download_finished = pyqtSignal(bool, str)
     download_progress = pyqtSignal(int)
@@ -29,137 +35,226 @@ class Worker(QObject):
         self.kwargs = kwargs
         self.process = None
         self._is_running = True
+        self.stoppable_resource = None
+        self.process_output_buffer = ""
+        self.original_url = ""
+        self.strategy_queue = []
+
+    def register_stoppable_resource(self, resource):
+        self.stoppable_resource = resource
+
+    def unregister_stoppable_resource(self):
+        self.stoppable_resource = None
 
     def run(self):
-        if not self._is_running: return
-
+        if not self._is_running:
+            return
         if self.task_type == "sniff":
             self._run_intelligent_sniff()
         elif self.task_type == "download":
             self._run_download()
 
     def _run_intelligent_sniff(self):
-        original_url = self.kwargs.get("url")
-        self.log.emit(f"后台：启动贝叶斯策略嗅探 -> {original_url}")
-        strategy_queue = select_best_strategy(original_url)
+        self.original_url = self.kwargs.get("url")
+        self.log.emit(f"后台：启动智能策略嗅探 -> {self.original_url}")
 
-        if not strategy_queue:
-            self.log.emit("<font color='red'>错误：没有找到适用于此URL的嗅探策略。</font>")
+        self.strategy_queue = select_best_strategy(self.original_url)
+        if not self.strategy_queue:
             if self._is_running:
-                self.sniff_finished.emit({"error": "没有适用的嗅探策略。"}, original_url)
+                self.sniff_finished.emit(
+                    {"error": "没有适用的嗅探策略。"}, self.original_url
+                )
             return
 
-        final_result = None
-        for strategy_name in strategy_queue:
-            if not self._is_running:
-                self.log.emit("嗅探操作被用户取消。")
-                # 不再发送信号，因为主窗口已经处理了停止状态
-                break
+        self._process_next_strategy()
 
-            self.log.emit(f"<b>策略执行: 尝试使用 '{strategy_name}' 引擎...</b>")
-            
+    def _process_next_strategy(self):
+        if not self._is_running:
+            self.sniff_finished.emit({"error": "操作被用户取消。"}, self.original_url)
+            return
+
+        if not self.strategy_queue:
+            self.sniff_finished.emit(
+                {"error": "所有推荐的嗅探策略均已尝试。"}, self.original_url
+            )
+            return
+
+        strategy_name = self.strategy_queue.pop(0)
+        self.log.emit(f"<b>策略执行: 尝试使用 '{strategy_name}' 引擎...</b>")
+
+        if strategy_name == "yt_dlp":
+            self._run_yt_dlp_sniff_qprocess(self.original_url)
+        else:
             backend_function_name = AVAILABLE_STRATEGIES.get(strategy_name)
             if not backend_function_name:
-                self.log.emit(f"<font color='red'>配置错误：策略 '{strategy_name}' 没有对应的后端函数。</font>")
-                continue
-            
-            if strategy_name == "direct_link":
-                path = urlparse(original_url).path; filename = os.path.basename(path); _, ext = os.path.splitext(path)
-                final_result = {"links": [{"url": original_url, "filename": filename, "category": "直接链接", "ext": ext}], "title": filename, "engine": "direct_link"}
-                self.log.emit(f"<font color='green'>策略 '{strategy_name}' 成功。</font>")
-                break
-            
+                self.log.emit(
+                    f"<font color='red'>配置错误：策略 '{strategy_name}' 没有对应的后端函数。</font>"
+                )
+                self._process_next_strategy()
+                return
             try:
                 backend_function = getattr(backend_scraper, backend_function_name)
-                # [说明] 这里的 backend_function 调用是阻塞点
-                result = backend_function(original_url)
-            except AttributeError:
-                msg = f"代码错误：后端模块中未找到函数 '{backend_function_name}'。"
-                self.log.emit(f"<font color='red'>{msg}</font>"); final_result = {"error": msg}; break
+                result = backend_function(self.original_url, context_worker=self)
+                self._handle_sniff_result(result, strategy_name)
             except Exception as e:
-                result = {"error": f"执行后端函数时发生意外错误: {e}"}
+                self._handle_sniff_result(
+                    {"error": f"执行后端函数时发生意外错误: {e}"}, strategy_name
+                )
 
-            if result and not result.get("error"):
-                self.log.emit(f"<font color='green'>策略 '{strategy_name}' 成功找到资源！</font>")
-                final_result = result
-                try:
-                    domain = urlparse(original_url).netloc
-                    update_experience_data(domain, strategy_name)
-                except Exception as e:
-                    logger.warning(f"更新经验数据失败: {e}")
-                break
-            else:
-                error_msg = result.get("error", "未知错误")
-                self.log.emit(f"策略 '{strategy_name}' 失败: {error_msg}")
-
-        if self._is_running:
-            if not final_result:
-                final_result = {"error": "所有推荐的嗅探策略均已尝试，未能找到任何资源。"}
-            self.sniff_finished.emit(final_result, original_url)
+    def _handle_sniff_result(self, result, strategy_name):
+        if result and not result.get("error"):
+            self.log.emit(
+                f"<font color='green'>策略 '{strategy_name}' 成功找到资源！</font>"
+            )
+            try:
+                update_experience_data(
+                    urlparse(self.original_url).netloc, strategy_name
+                )
+            except Exception as e:
+                logger.warning(f"更新经验数据失败: {e}")
+            self.sniff_finished.emit(result, self.original_url)
         else:
-            # 如果是因为取消而退出循环，也需要通知UI任务结束
-             self.sniff_finished.emit({"error": "操作被用户取消。"}, original_url)
+            error_msg = result.get("error", "未知错误") if result else "未知错误"
+            self.log.emit(f"策略 '{strategy_name}' 失败: {error_msg}")
+            self._process_next_strategy()
+
+    def _run_yt_dlp_sniff_qprocess(self, url):
+        yt_dlp_exe = backend_scraper.get_executable_path("yt-dlp.exe")
+        if not os.path.exists(yt_dlp_exe):
+            self._handle_sniff_result({"error": "yt-dlp.exe 未找到"}, "yt_dlp")
+            return
+
+        command = [yt_dlp_exe, "--dump-json", "--no-warnings", url]
+        self.process = QProcess()
+        self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        self.process_output_buffer = ""
+
+        def handle_output():
+            self.process_output_buffer += (
+                self.process.readAllStandardOutput()
+                .data()
+                .decode("utf-8", errors="ignore")
+            )
+
+        def handle_finish(exit_code, exit_status):
+            handle_output()
+            result = {}
+            if not self._is_running:
+                result = {"error": "操作被用户取消。"}
+            elif exit_code == 0:
+                try:
+                    json_line = self.process_output_buffer.strip().split("\n")[0]
+                    data = json.loads(json_line)
+                    data["engine"] = "yt-dlp"
+                    result = data
+                except Exception as e:
+                    result = {"error": f"解析yt-dlp输出失败: {e}"}
+            else:
+                result = {"error": f"yt-dlp 执行失败 (代码: {exit_code})"}
+            self.process = None
+            self._handle_sniff_result(result, "yt_dlp")
+
+        self.process.readyReadStandardOutput.connect(handle_output)
+        self.process.finished.connect(handle_finish)
+        self.process.start(command[0], command[1:])
 
     def _run_download(self):
         resource_type = self.kwargs.get("resource_type")
         if resource_type == "yt-dlp":
-            self._run_yt_dlp_download()
-        else: # "direct"
+            self._run_yt_dlp_download_qprocess()
+        else:
             self._run_direct_download()
-            
-    def _run_yt_dlp_download(self):
-        url, formats, download_path = self.kwargs.get("url"), self.kwargs.get("formats"), self.kwargs.get("download_path")
-        command = backend_scraper.build_download_command(url, formats, download_path)
-        
-        try:
-            self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='ignore', creationflags=CREATION_FLAGS)
-        except Exception as e:
-            if not self._is_running: return
-            logger.error(f"启动 yt-dlp 下载进程时出错: {e}")
-            self.download_finished.emit(False, f"启动下载失败: {e}")
-            return
 
-        try:
-            progress_pattern = re.compile(r"download-stream:(\s*\d+\.?\d*%)")
-            for line in self.process.stdout:
-                line_strip = line.strip()
-                if line_strip: self.log.emit(f"[yt-dlp] {line_strip}")
-                if match := progress_pattern.search(line):
-                    percentage = int(float(match.group(1).strip().replace('%', '')))
-                    self.download_progress.emit(percentage)
-            
-            return_code = self.process.wait()
-            if not self._is_running: self.download_finished.emit(False, "操作被用户取消。")
-            elif return_code == 0: self.download_progress.emit(100); self.download_finished.emit(True, "下载成功完成。")
-            else: self.download_finished.emit(False, f"下载失败，进程返回码: {return_code}")
-        except Exception as e:
-            if not self._is_running: self.download_finished.emit(False, "操作被用户取消。")
-            else:
-                logger.error(f"监控下载进程时发生未知错误: {e}")
-                self.download_finished.emit(False, f"监控下载时发生错误: {e}")
-        finally:
-            self.process = None
+    def _run_yt_dlp_download_qprocess(self):
+        if not self._is_running:
+            self.download_finished.emit(False, "任务在启动前被取消。")
+            return
+        url, formats, download_path = (
+            self.kwargs.get("url"),
+            self.kwargs.get("formats"),
+            self.kwargs.get("download_path"),
+        )
+        command_list = backend_scraper.build_download_command(
+            url, formats, download_path
+        )
+        self.process = QProcess()
+        self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        self.process.readyReadStandardOutput.connect(self._on_yt_dlp_output)
+        self.process.finished.connect(self._on_yt_dlp_finished)
+        self.process.start(command_list[0], command_list[1:])
+
+    def _on_yt_dlp_output(self):
+        if not self.process:
+            return
+        output = (
+            self.process.readAllStandardOutput().data().decode("utf-8", errors="ignore")
+        )
+        progress_pattern = re.compile(r"download-stream:(\s*\d+\.?\d*%)")
+        for line in output.splitlines():
+            if line.strip():
+                self.log.emit(f"[yt-dlp] {line.strip()}")
+            if match := progress_pattern.search(line):
+                try:
+                    self.download_progress.emit(
+                        int(float(match.group(1).strip().replace("%", "")))
+                    )
+                except (ValueError, IndexError):
+                    pass
+
+    def _on_yt_dlp_finished(self, exit_code, exit_status):
+        self._on_yt_dlp_output()
+        if not self._is_running:
+            self.download_finished.emit(False, "操作被用户取消。")
+        elif exit_code == 0:
+            self.download_progress.emit(100)
+            self.download_finished.emit(True, "下载成功完成。")
+        else:
+            status_msg = (
+                "崩溃" if exit_status == QProcess.ExitStatus.CrashExit else "正常退出"
+            )
+            self.download_finished.emit(
+                False, f"下载失败 (代码: {exit_code}, 状态: {status_msg})"
+            )
+        self.process = None
 
     def _run_direct_download(self):
-        if not self._is_running: return
+        if not self._is_running:
+            self.download_finished.emit(False, "任务在启动前被取消。")
+            return
         direct_url = self.kwargs.get("direct_url")
         download_path = self.kwargs.get("download_path")
         stop_callback = lambda: not self._is_running
+        success, msg = backend_scraper.download_direct_link(
+            direct_url,
+            download_path,
+            progress_callback=self.download_progress.emit,
+            stop_callback=stop_callback,
+        )
+        if self._is_running:
+            self.download_finished.emit(success, msg)
+        else:
+            self.download_finished.emit(False, "操作被用户取消。")
 
-        success, msg = backend_scraper.download_direct_link(direct_url, download_path, progress_callback=self.download_progress.emit, stop_callback=stop_callback)
-        
-        if self._is_running: self.download_finished.emit(success, msg)
-        else: self.download_finished.emit(False, "操作被用户取消。")
-            
     def stop(self):
         self.log.emit("后台：收到停止请求，正在执行...")
         self._is_running = False
-        if self.process and self.process.poll() is None:
+        if (
+            isinstance(self.process, QProcess)
+            and self.process.state() != QProcess.ProcessState.NotRunning
+        ):
             try:
-                self.log.emit(f"正在终止子进程 (PID: {self.process.pid})...")
-                self.process.terminate()
+                self.log.emit(f"正在终止 QProcess (PID: {self.process.processId()})...")
+                self.process.kill()
             except Exception as e:
-                logger.error(f"终止进程时发生未知错误: {e}")
-                self.log.emit(f"<font color='red'>终止进程时出错: {e}</font>")
+                logger.error(f"终止 QProcess 时发生未知错误: {e}")
+        elif self.stoppable_resource:
+            try:
+                if isinstance(self.stoppable_resource, uc.Chrome):
+                    self.log.emit("正在关闭浏览器驱动...")
+                    self.stoppable_resource.quit()
+            except Exception as e:
+                logger.error(f"停止嗅探资源时出错: {e}")
+            finally:
+                self.unregister_stoppable_resource()
         else:
-            self.log.emit("没有活动的子进程需要停止。")
+            self.log.emit("没有活动的嗅探资源或下载子进程需要停止。")
