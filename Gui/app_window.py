@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
     QProgressBar,
 )
 from PyQt6.QtCore import QThread, QSettings, QDir, Qt, QPoint
-from PyQt6.QtGui import QFont, QIcon, QAction, QBrush, QColor
+from PyQt6.QtGui import QFont, QBrush, QColor
 
 from worker import Worker
 
@@ -38,12 +38,12 @@ logger = logging.getLogger(__name__)
 
 class AppWindow(QMainWindow):
     """
-    应用程序的主窗口类 (v3.2 - 最终稳定版)
+    应用程序的主窗口类
     """
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("终极资源嗅探下载器 v3.2 (最终稳定版)")
+        self.setWindowTitle("Resource Sniffer GUI")
         self.setGeometry(100, 100, 1200, 800)
 
         self.download_queue = []

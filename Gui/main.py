@@ -1,6 +1,5 @@
 # main.py
 import sys
-import logging
 from PyQt6.QtWidgets import QApplication
 from app_window import AppWindow
 
