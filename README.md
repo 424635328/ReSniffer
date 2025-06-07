@@ -1,33 +1,34 @@
 
+# ReSniffer
 
+```
 ██████╗ ███████╗███████╗███╗   ██╗██╗███████╗███████╗███████╗██████╗
 ██╔══██╗██╔════╝██╔════╝████╗  ██║██║██╔════╝██╔════╝██╔════╝██╔══██╗
 ██████╔╝█████╗  ███████╗██╔██╗ ██║██║█████╗  █████╗  ███████╗██████╔╝
 ██╔══██╗██╔══╝  ╚════██║██║╚██╗██║██║██╔══╝  ██╔══╝  ╚════██║██╔══██╗
 ██║  ██║███████╗███████║██║ ╚████║██║███████╗███████╗███████║██║  ██║
 ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═══╝╚═╝╚══════╝╚══════╝╚══════╝╚═╝  ╚═╝
+```
+**一个拥有“决策大脑”的次世代智能资源嗅探器**
 
-  <p><strong>一个拥有“决策大脑”的次世代智能资源嗅探器</strong></p>
-  
-  <p>
-    <a href="https://github.com/424635328/ReSniffer/releases/latest">
-      <img src="https://img.shields.io/github/v/release/424635328/ReSniffer?style=for-the-badge&logo=github&color=8e44ad" alt="Latest Release">
-    </a>
-    <a href="https://github.com/424635328/ReSniffer/stargazers">
-      <img src="https://img.shields.io/github/stars/424635328/ReSniffer?style=for-the-badge&logo=github&color=f1c40f" alt="Stargazers">
-    </a>
-    <a href="https://github.com/424635328/ReSniffer/blob/main/LICENSE">
-      <img src="https://img.shields.io/github/license/424635328/ReSniffer?style=for-the-badge&color=2ecc71" alt="License">
-    </a>
-  </p>
-  
-  <p>
-    <img src="https://img.shields.io/badge/Python-3.9+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python Version">
-    <img src="https://img.shields.io/badge/PyQt-6-2b7e2b?style=flat-square&logo=qt&logoColor=white" alt="PyQt6">
-    <img src="https://img.shields.io/badge/Engine-yt--dlp-FF0000?style=flat-square" alt="yt-dlp">
-    <img src="https://img.shields.io/badge/Engine-Selenium-43B02A?style=flat-square&logo=selenium" alt="Selenium">
-  </p>
-</div>
+<p>
+  <a href="https://github.com/424635328/ReSniffer/releases/latest">
+    <img src="https://img.shields.io/github/v/release/424635328/ReSniffer?style=for-the-badge&logo=github&color=8e44ad" alt="Latest Release">
+  </a>
+  <a href="https://github.com/424635328/ReSniffer/stargazers">
+    <img src="https://img.shields.io/github/stars/424635328/ReSniffer?style=for-the-badge&logo=github&color=f1c40f" alt="Stargazers">
+  </a>
+  <a href="https://github.com/424635328/ReSniffer/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/424635328/ReSniffer?style=for-the-badge&color=2ecc71" alt="License">
+  </a>
+</p>
+
+<p>
+  <img src="https://img.shields.io/badge/Python-3.9+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python Version">
+  <img src="https://img.shields.io/badge/PyQt-6-2b7e2b?style=flat-square&logo=qt&logoColor=white" alt="PyQt6">
+  <img src="https://img.shields.io/badge/Engine-yt--dlp-FF0000?style=flat-square" alt="yt-dlp">
+  <img src="https://img.shields.io/badge/Engine-Selenium-43B02A?style=flat-square&logo=selenium" alt="Selenium">
+</p>
 
 **ReSniffer** 重新定义了网页资源获取。它不仅是一个工具，更是一位数字世界的考古学家。它能穿透层层迷雾，从最简单直接的链接到由JavaScript动态构建的复杂Web应用，智能地勘探并挖掘出深埋其中的宝贵数字资源。
 
@@ -73,8 +74,6 @@
 ## 🧠 技术架构：CSI智能嗅探模型
 
 ReSniffer的设计哲学是“专业的事交给专业的工具”。其核心是一个名为 **CSI (Crawl, Sniff, Investigate)** 的智能嗅探模型，它将复杂的决策过程解耦为四个独立的模块：
-
-![架构图](https://github.com/424635328/ReSniffer/blob/main/docs/architecture.png)
 
 1. **`app_window.py`**: **UI层 (The Bridge)**。负责所有与用户界面的交互、布局和视觉呈现。它完全使用PyQt代码构建，并应用QSS样式。它不知道任何嗅探或下载的具体逻辑。
 2. **`worker.py`**: **调度层 (The Dispatcher)**。作为UI和后端的桥梁。它接收来自UI的简单任务请求（如“嗅探这个URL”），然后调用策略分析器决定如何执行，并管理后台线程和子进程的生命周期。
@@ -210,7 +209,7 @@ ReSniffer/
 
 ## 📄 许可证
 
-本项目采用 [Boost](https://github.com/424635328/ReSniffer/blob/main/LICENSE) 许可证。
+本项目采用 [BSL](https://github.com/424635328/ReSniffer/blob/main/LICENSE) 许可证。
 
 <div align="center">
   <p>探索数字世界的深度，释放信息的自由。</p>
